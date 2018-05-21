@@ -6,12 +6,11 @@ import math
 import time
 import datetime
 
-
-from network.network import theNetwork
-
+from network import network, fcrn
 
 
-CHECKPOINT_DIR = './train_checkpoint'
+CHECKPOINT_DIR = './output/ch'
+SUMMARY_DIR = 'output/train'
 TRAIN_FILE = 'train.csv'
 TEST_FILE = 'test.csv'
 
@@ -23,7 +22,7 @@ BATCH_SIZE = 10
 
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 500
 NUM_EPOCHS_PER_DECAY = 1
-INITIAL_LEARNING_RATE = 0.00001
+INITIAL_LEARNING_RATE = 0.00000000000000001
 LEARNING_RATE_DECAY_FACTOR = 0.9
 MOVING_AVERAGE_DECAY = 0.999999
 
@@ -175,6 +174,32 @@ def train(total_loss, global_step):
 
   return variables_averages_op, variables_to_restore
 
+def restore(sess, switch=False):
+    #can we be sure we'll have these moving averages??????
+    #TODO: handle case when no checkpoint
+    # Restore the moving average version of the learned variables for eval.
+    # Use to load from ckpt file
+    model_data_path = tf.train.latest_checkpoint( CHECKPOINT_DIR )
+    if model_data_path is None:
+	return None
+    print("model_data_path")
+    print("model_data_path")
+    print(model_data_path)
+    #model_data_path = './network2/checkpoint/NYU_FCRN.ckpt'
+    saver = tf.train.Saver()
+    saver.restore(sess, model_data_path)
+
+    # Assuming model_checkpoint_path looks something like:
+    #   /my-favorite-path/cifar10_train/model.ckpt-0,
+    # extract global_step from it.
+    global_step = model_data_path.split('/')[-1].split('-')[-1]
+
+    print('checkpoint loaded with global_step: ' + str(global_step))
+    return 1
+
+def getInference( images ):
+    net = fcrn.ResNet50UpProj({'data': images}, 1, 1, False)
+    return net.get_output()	
 
 def runIt(inputNetwork):
     with tf.Graph().as_default():
@@ -183,7 +208,7 @@ def runIt(inputNetwork):
         depthImageSize = (TARGET_HEIGHT, TARGET_WIDTH)
 	filename, depth_filename = getFilenameQueuesFromCSVFile( TRAIN_FILE )
         images, depths, invalid_depths, filenames = csv_inputs(filename, depth_filename, BATCH_SIZE, imageSize=imageSize, depthImageSize=depthImageSize)
-        logits = inputNetwork.getInference(images)
+        logits = getInference(images)
         tf.summary.image('input_images', logits, max_outputs=3)
         #loss_op = loss_scale_invariant_l2_norm(logits, depths, invalid_depths)
         loss_op = loss_l2_norm(logits, depths, invalid_depths)
@@ -192,7 +217,11 @@ def runIt(inputNetwork):
 
         init = tf.global_variables_initializer()
 	with tf.Session() as sess:
-		checkCkpt = inputNetwork.restore(sess, restoreVar)
+
+		merged = tf.summary.merge_all()
+		train_writer = tf.summary.FileWriter( SUMMARY_DIR, sess.graph )
+
+		checkCkpt = restore(sess, restoreVar)
 		
 		coord = tf.train.Coordinator()
 		try:
@@ -205,9 +234,11 @@ def runIt(inputNetwork):
 			print("init run")
 			for i in range(1000000):
 				if not i % 100 == 0 and not i % 10 == 0  :
-					sess.run([train_op])
+					summary, _ = sess.run([merged, train_op])
+					train_writer.add_summary(summary, i)
 				elif not i % 100 == 0 and i % 10 == 0 :
-					_, loss = sess.run([train_op, loss_op])
+					summary, _, loss = sess.run([merged, train_op, loss_op])
+					train_writer.add_summary(summary, i)
 					print( "step: " + str(i) + "\tloss: " + str(loss) )
 				else:
 					_, loss, outputDepth, testDepth, image, filenames2 = sess.run([train_op, loss_op, logits, depths, images, filenames])
@@ -247,7 +278,7 @@ def runIt(inputNetwork):
 def main(argv=None):  # pylint: disable=unused-argument
 	if not os.path.exists(CHECKPOINT_DIR):
 		os.makedirs(CHECKPOINT_DIR)
-	inputNetwork = theNetwork()
+	inputNetwork = network
 	runIt(inputNetwork)
 
 main()

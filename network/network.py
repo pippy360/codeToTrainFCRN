@@ -387,46 +387,8 @@ class Network(object):
         self.feed(output)
         return self
 
-
-
-class theNetwork:
-
-	def getInference(self, images):
-	    net = fcrn.ResNet50UpProj({'data': images}, 1, 1, False)
-	    return net.get_output()
-
-	def getCheckpointDir(self):
-		return './output/ch/'
-
-	def restore(self, sess, switch=False):
-
-	    #can we be sure we'll have these moving averages??????
-
-	    #TODO: handle case when no checkpoint
-
-	    # Restore the moving average version of the learned variables for eval.
-
-            # Use to load from ckpt file
-            model_data_path = tf.train.latest_checkpoint( self.getCheckpointDir() )
-	    if model_data_path is None:
-		return None
-            print("model_data_path")
-            print(model_data_path)
-            #model_data_path = './network2/checkpoint/NYU_FCRN.ckpt'
-            saver = tf.train.Saver()     
-            saver.restore(sess, model_data_path)
-
-	    # Assuming model_checkpoint_path looks something like:
-	    #   /my-favorite-path/cifar10_train/model.ckpt-0,
-	    # extract global_step from it.
-	    global_step = model_data_path.split('/')[-1].split('-')[-1]
-
-	    print('checkpoint loaded with global_step: ' + str(global_step))
-	    return 1
-
-
-
-
-
+def getInference(images):
+    net = fcrn.ResNet50UpProj({'data': images}, 1, 1, False)
+    return net.get_output()
 
 
