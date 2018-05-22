@@ -124,7 +124,7 @@ class Network(object):
 
     def make_var(self, name, shape):
         '''Creates a new TensorFlow variable.'''
-        return tf.get_variable(name, shape, dtype = 'float32', trainable=self.trainable)
+        return tf.get_variable(name, shape, dtype = 'float32', trainable=True)
 
     def validate_padding(self, padding):
         '''Verifies that the padding is one of the supported ones.'''

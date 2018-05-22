@@ -22,7 +22,7 @@ BATCH_SIZE = 10
 
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 500
 NUM_EPOCHS_PER_DECAY = 1
-INITIAL_LEARNING_RATE = 0.00000000000000001
+INITIAL_LEARNING_RATE = 0.0000001
 LEARNING_RATE_DECAY_FACTOR = 0.9
 MOVING_AVERAGE_DECAY = 0.999999
 
@@ -44,12 +44,8 @@ def csv_inputs(image_filename, depth_filename, batch_size, imageSize, depthImage
     # target
     depth = tf.read_file(depth_filename)
     depth = tf.image.decode_png(depth, channels=3)#fixme: change to 1 channel
-    print('depth.shape')
-    print(depth.shape)
     depth = tf.image.resize_images(depth, depthImageSize)
-    print(depth.shape)
     depth = tf.slice(depth, [0,0, 0], [-1,-1,1])
-    depth = tf.divide(depth, 100.0)
 
     # resize
     invalid_depth = tf.sign(depth)
@@ -60,7 +56,6 @@ def csv_inputs(image_filename, depth_filename, batch_size, imageSize, depthImage
         num_threads=4,
         capacity= 50 + 3 * batch_size,
     )
-    tf.summary.image('input_images', images, max_outputs=3)
     return images, depths, invalid_depths, filenames
 
 
@@ -143,6 +138,7 @@ def train(total_loss, global_step):
                                   decay_steps,
                                   LEARNING_RATE_DECAY_FACTOR,
                                   staircase=True)
+  lr = INITIAL_LEARNING_RATE
   tf.summary.scalar('learning_rate', lr)
 
   # Generate moving averages of all losses and associated summaries.
@@ -164,7 +160,7 @@ def train(total_loss, global_step):
   for grad, var in grads:
     if grad is not None:
       tf.summary.histogram(var.op.name + '/gradients', grad)
-
+  return apply_gradient_op
   # Track the moving averages of all trainable variables.
   variable_averages = tf.train.ExponentialMovingAverage(
       MOVING_AVERAGE_DECAY, global_step)
@@ -201,19 +197,33 @@ def getInference( images ):
     net = fcrn.ResNet50UpProj({'data': images}, 1, 1, False)
     return net.get_output()	
 
+def saveImage(imageArr, outputFileLocation):
+	formatted = ( ( imageArr[0,:,:,0] ) * 255 / np.max( imageArr[0,:,:,0] ) ).astype('uint8')
+	img = Image.fromarray( formatted )
+	img.save( outputFileLocation )
+
+def addImageSummary():
+	pass
+
+def handleImageValues( images_raw, depths_raw ):
+	return tf.divide(images_raw, 255.0), tf.divide(depths_raw, 255.0)
+	
+
 def runIt(inputNetwork):
     with tf.Graph().as_default():
 	global_step = tf.train.get_or_create_global_step()
-        imageSize = (IMAGE_HEIGHT, IMAGE_WIDTH)
-        depthImageSize = (TARGET_HEIGHT, TARGET_WIDTH)
+        imageSize = ( IMAGE_HEIGHT, IMAGE_WIDTH )
+        depthImageSize = ( TARGET_HEIGHT, TARGET_WIDTH )
 	filename, depth_filename = getFilenameQueuesFromCSVFile( TRAIN_FILE )
-        images, depths, invalid_depths, filenames = csv_inputs(filename, depth_filename, BATCH_SIZE, imageSize=imageSize, depthImageSize=depthImageSize)
+        images_raw, depths_raw, invalid_depths, filenames = csv_inputs( filename, depth_filename, BATCH_SIZE, imageSize=imageSize, depthImageSize=depthImageSize )
+	images, depths = handleImageValues( images_raw, depths_raw )
+	addImageSummary()
         logits = getInference(images)
         tf.summary.image('input_images', logits, max_outputs=3)
         #loss_op = loss_scale_invariant_l2_norm(logits, depths, invalid_depths)
-        loss_op = loss_l2_norm(logits, depths, invalid_depths)
+        loss_op = loss_l2_norm( logits, depths, invalid_depths )
 
-  	train_op, restoreVar = train(loss_op, global_step)
+  	train_op = train( loss_op, global_step )
 
         init = tf.global_variables_initializer()
 	with tf.Session() as sess:
@@ -221,7 +231,7 @@ def runIt(inputNetwork):
 		merged = tf.summary.merge_all()
 		train_writer = tf.summary.FileWriter( SUMMARY_DIR, sess.graph )
 
-		checkCkpt = restore(sess, restoreVar)
+		checkCkpt = None #restore(sess, restoreVar)
 		
 		coord = tf.train.Coordinator()
 		try:
@@ -232,6 +242,7 @@ def runIt(inputNetwork):
 				sess.run([init])
 				
 			print("init run")
+
 			for i in range(1000000):
 				if not i % 100 == 0 and not i % 10 == 0  :
 					summary, _ = sess.run([merged, train_op])
