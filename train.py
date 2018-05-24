@@ -20,7 +20,7 @@ TARGET_HEIGHT = 128
 TARGET_WIDTH = 160
 BATCH_SIZE = 10
 
-NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 500
+NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 5000
 NUM_EPOCHS_PER_DECAY = 1
 INITIAL_LEARNING_RATE = 0.0000001
 LEARNING_RATE_DECAY_FACTOR = 0.9
@@ -159,7 +159,7 @@ def train(total_loss, global_step):
   for grad, var in grads:
     if grad is not None:
       tf.summary.histogram(var.op.name + '/gradients', grad)
-  return apply_gradient_op
+
   # Track the moving averages of all trainable variables.
   variable_averages = tf.train.ExponentialMovingAverage(
       MOVING_AVERAGE_DECAY, global_step)
@@ -170,27 +170,24 @@ def train(total_loss, global_step):
   return variables_averages_op, variables_to_restore
 
 def restore(sess, switch=False):
-    #can we be sure we'll have these moving averages??????
-    #TODO: handle case when no checkpoint
     # Restore the moving average version of the learned variables for eval.
     # Use to load from ckpt file
     model_data_path = tf.train.latest_checkpoint( CHECKPOINT_DIR )
     if model_data_path is None:
-	return None
-    print("model_data_path")
+	return 0, False
     print("model_data_path")
     print(model_data_path)
-    #model_data_path = './network2/checkpoint/NYU_FCRN.ckpt'
+
     saver = tf.train.Saver()
     saver.restore(sess, model_data_path)
 
     # Assuming model_checkpoint_path looks something like:
     #   /my-favorite-path/cifar10_train/model.ckpt-0,
     # extract global_step from it.
-    global_step = model_data_path.split('/')[-1].split('-')[-1]
+    global_step_loaded = model_data_path.split('/')[-1].split('-')[-1]
 
-    print('checkpoint loaded with global_step: ' + str(global_step))
-    return 1
+    print('checkpoint loaded with global_step: ' + str(global_step_loaded))
+    return None, True
 
 def getInference( images ):
     net = fcrn.ResNet50UpProj({'data': images}, 1, 1, False)
@@ -222,7 +219,7 @@ def runIt(inputNetwork):
         #loss_op = loss_scale_invariant_l2_norm(logits, depths, invalid_depths)
         loss_op = loss_l2_norm( logits, depths, invalid_depths )
 
-  	train_op = train( loss_op, global_step )
+  	train_op, restoreVar = train( loss_op, global_step )
 
         init = tf.global_variables_initializer()
 	with tf.Session() as sess:
@@ -230,29 +227,29 @@ def runIt(inputNetwork):
 		merged = tf.summary.merge_all()
 		train_writer = tf.summary.FileWriter( SUMMARY_DIR, sess.graph )
 
-		checkCkpt = None #restore(sess, restoreVar)
-		
+		_, checkpointExists = restore(sess, restoreVar)
 		coord = tf.train.Coordinator()
 		try:
 			threads = []
 			for qr in tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS):
 				threads.extend(qr.create_threads(sess, coord=coord, daemon=True, start=True))
-			if checkCkpt is None:
+			if not checkpointExists:
 				sess.run([init])
 				
 			print("init run")
 
-			for i in range(1000000):
+			while True:
+				i = sess.run([global_step])[0]
 				if not i % 100 == 0 and not i % 10 == 0  :
 					summary, _ = sess.run([merged, train_op])
 					train_writer.add_summary(summary, i)
 				elif not i % 100 == 0 and i % 10 == 0 :
 					summary, _, loss = sess.run([merged, train_op, loss_op])
 					train_writer.add_summary(summary, i)
-					print( "step: " + str(i) + "\tloss: " + str(loss) )
+					print( "step: " + str( i ) + "\tloss: " + str(loss) )
 				else:
 					_, loss, outputDepth, testDepth, image, filenames2 = sess.run([train_op, loss_op, logits, depths, images, filenames])
-					print( "step: " + str(i) + "\tloss: " + str(loss) )
+					print( "step: " + str( i ) + "\tloss: " + str(loss) )
 					
 					pred = outputDepth
 					#print("np.max(pred[0,:,:,0])):")
@@ -277,7 +274,7 @@ def runIt(inputNetwork):
 					#print('filenames')
 					#print(filenames2)
 					saver = tf.train.Saver()
-					saver.save(sess, './output/ch/ch')
+					saver.save( sess, './output/ch/ch-' + str(i) )
 		except Exception as e:
 			coord.request_stop(e)
 			print(e)
