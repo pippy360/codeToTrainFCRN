@@ -1,2 +1,4 @@
 # codeToTrainFCRN
 codeToTrainFCRN
+
+THIS CODE IS TOTALLY BROKEN
